@@ -353,19 +353,20 @@ class DataDealer:
         pad_token = self.tokenizer.pad_token
         if task_type=='head':
             pos_cls = self.tokenizer.dic_start_pos_cls
-            prompt_pos_list = list(pos_cls.values()) + [pad_token]*len(pos_cls)
+            padded_prompt_pos = list(pos_cls.values()) + [pad_token]*len(pos_cls)
         else:
             pos_cls = self.tokenizer.dic_end_pos_cls
-            prompt_pos_list = [pad_token]*len(pos_cls) + list(pos_cls.values())
+            # print('359', pos_cls)
+            padded_prompt_pos = [pad_token]*len(pos_cls) + list(pos_cls.values())
         src_toks = sent_bund[0]
         txt_ids = [self.tokens_to_ids(tk) for tk in src_toks]
-        src_toks = [src_toks[0]] + prompt_pos_list + src_toks[1:]
+        src_toks = [src_toks[0]] + padded_prompt_pos + src_toks[1:]
         enc_src_ids = [self.tokens_to_ids(tk) for tk in src_toks]
         '''获得监督标签'''
         targ_ents = get_semi_ents(sent_pos_bund[-1], pos_cls, task_type)
-        
+        # print(list(pos_cls.keys()))
         return {
-            'cls_toks_num': len(pos_cls),
+            'prompt_pos_list': list(pos_cls.keys()),
             'raw_chars': sent_bund[0],
             'src_toks': src_toks,
             'targ_toks': sent_bund[-1],

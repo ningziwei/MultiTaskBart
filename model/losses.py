@@ -48,12 +48,16 @@ class CrossEntropyLossWithMask(nn.Module):
         # print('pred_util', pred_util.shape, pred_util[0])
         # print('logsoftmax', logsoftmax.shape, logsoftmax[0])
         # print('50', torch.sum(1-mask.float()))
-        tmp = pred
+        print('51 logsoftmax', logsoftmax.shape)
+        # print('52 one_hot_tgt*logsoftmax', one_hot_tgt*logsoftmax)
+        # return 
+        tmp = one_hot_tgt*logsoftmax
         for i in range(tmp.size(0)):
             # print('52', i)
             for j in range(tmp.size(1)):
                 for k in range(tmp.size(2)):
                     if tmp[i][j][k]>100 or tmp[i][j][k]<-100 or torch.isnan(tmp[i][j][k]):
+                        print(tgt_tokens[i])
                         print(i,j,k)
                         print(tmp[i][j])
                         print(pred_util[i][j])

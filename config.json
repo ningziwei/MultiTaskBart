@@ -23,6 +23,6 @@
     "src_self_sup": 0,
     "模型参数": 1,
     "static_eos": 0,
-    "enc_attn_mask": 1,
+    "enc_attn_mask": 0,
     "use_lstm": 0
 }

@@ -194,14 +194,15 @@ def calib_pred(preds, end_pos, fold, targ=None):
                 break
     return new_preds
 
-def evaluate(config, model, loader, prompt_pos_list):
+def evaluate(config, model, loader):
     with torch.no_grad():
         model.eval()
         task_type = config['task_type']
         get_ents = get_semi_ents
         predicts, labels = [], []
-        for batch in loader:
+        for multi_batch in loader:
             # if len(batch['targ_ents'][0])==0: continue
+            batch = multi_batch[task_type]
             pred = model(
                 batch['enc_src_ids'],
                 batch['enc_src_len'],
@@ -210,11 +211,11 @@ def evaluate(config, model, loader, prompt_pos_list):
                 dec_src_ids_bund=batch['dec_src_ids_bund'],
                 dec_src_pos_bund=batch['dec_src_pos_bund'],
                 dec_mask_bund=batch['dec_mask_bund'],
-                prompt_pos_list=prompt_pos_list
+                prompt_pos_list=batch['prompt_pos_list']
             )
             # pred = [get_targ_ents(p, rotate_pos_cls) for p in pred]
             # pred = [calib_pred(p, ent_end_pos) for p in pred]
-            ent_pred = [get_ents(p, prompt_pos_list, task_type) for p in pred]
+            ent_pred = [get_ents(p, batch['prompt_pos_list'], task_type) for p in pred]
 
             predicts += ent_pred
             labels += batch['targ_ents']
@@ -282,16 +283,15 @@ def train(config):
         optimizer.zero_grad()
         step = 0
         denomin = 1
-        if config['targ_self_sup']:
-            denomin += 1
-        prompt_pos_list = list(tokenizer.dic_start_pos_cls.keys())
-        print('prompt_pos_list', prompt_pos_list)
+        if config['targ_self_sup']: denomin += 1
+        task_type = 'tail'
         for epoch in range(config["epochs"]):
             model.train()
             # train_range = get_train_range(epoch, config['fold'])
             stage = epoch % denomin
             # if epoch>84 and stage==denomin-2: continue
-            for batch in train_loader:
+            for multi_batch in train_loader:
+                batch = multi_batch[task_type]
                 step += 1
                 if config['src_self_sup'] and stage==0:
                     enc_src_ids = batch['txt_ids']
@@ -303,7 +303,8 @@ def train(config):
                     enc_src_len = batch['enc_src_len']
                     enc_padding_mask = batch['enc_mask']
                     enc_attn_mask = batch['enc_attn_mask']
-                config['task_type'] = 'head'
+                config['task_type'] = task_type
+                # print('train 307', batch)
                 loss, pred = model(
                     enc_src_ids,
                     enc_src_len,
@@ -312,7 +313,7 @@ def train(config):
                     dec_src_ids_bund=batch['dec_src_ids_bund'],
                     dec_mask_bund=batch['dec_mask_bund'],
                     dec_targ_pos_bund=batch['dec_targ_pos_bund'],
-                    prompt_pos_list=prompt_pos_list,
+                    prompt_pos_list=batch['prompt_pos_list'],
                     train_range=[stage]
                 )
                 loss.backward()
@@ -333,13 +334,11 @@ def train(config):
             epoch_sched.step()
 
             if epoch>=config['start_eval']:
-                valid_metrics = evaluate(
-                   config, model, valid_loader, prompt_pos_list)
+                valid_metrics = evaluate(config, model, valid_loader)
                 vep, ver, vef, vep1, ver1, vef1 = [m*100 for m in valid_metrics]
                 logger("Epoch %d, valid entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
                     epoch + 1, vep, ver, vef, vep1, ver1, vef1))
-                test_metrics = evaluate(
-                    config, model, test_loader, prompt_pos_list)
+                test_metrics = evaluate(config, model, test_loader)
                 tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
                 logger("Epoch %d, test entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
                     epoch + 1, tep, ter, tef, tep1, ter1, tef1))
@@ -377,15 +376,12 @@ def predict(config):
 
     state_dict_path = os.path.join(config["saved_path"], 'snapshot.model')
     model.load_state_dict(torch.load(state_dict_path))
-    prompt_pos_list = list(tokenizer.dic_start_pos_cls.keys())
     config['task_type'] = 'head'
-    valid_metrics = evaluate(
-        config, model, valid_loader, prompt_pos_list)
+    valid_metrics = evaluate(config, model, valid_loader)
     vep, ver, vef, vep1, ver1, vef1 = [m*100 for m in valid_metrics]
     print("valid entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
         vep, ver, vef, vep1, ver1, vef1))
-    test_metrics = evaluate(
-        config, model, test_loader, prompt_pos_list)
+    test_metrics = evaluate(config, model, test_loader)
     tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
     print("test entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
         tep, ter, tef, tep1, ter1, tef1))

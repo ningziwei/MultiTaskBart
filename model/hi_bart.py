@@ -95,7 +95,8 @@ class HiDecoder(nn.Module):
             min_p = min(prompt_pos_list)
             max_p = max(prompt_pos_list)
             p_num = len(prompt_pos_list)
-            logits[:,:,min_p:max_p+1] = word_scores[:,:,1:1+p_num]
+            logits[:,:,min_p:max_p+1] = word_scores[:,:,min_p-1:max_p]
+            # print('99', logits[:,:,min_p:max_p+1])
             # logits[:,:,max_p+1+1:] = word_scores[:,:,1+p_num:-1]
             logits[:,:,2+p_num*2:] = word_scores[:,:,1+p_num*2:-1]
         else:

@@ -59,30 +59,32 @@ class GroupBatchRandomSampler(Sampler):
     def __len__(self):
         return len(self.batch_indices)
 
-def collate_fn(batch_data, config):
-    '''根据batch结果实时生成模型的输入数据，避免内存压力太大'''
+def get_task_padded_batch(batch_data, config):
+    '''针对多个任务生成填充后的数据'''
     pad_value = config['pad_value']
     device = config['device']
     padded_batch = defaultdict(list)
-
-    batch_data = [b['head'] for b in batch_data]
-    if config['src_self_sup']:
-        txt_ids, mask = padding(
-            [d["txt_ids"] for d in batch_data], pad_value)
-        padded_batch["txt_ids"] = torch.tensor(txt_ids, dtype=torch.long, device=device)
-        txt_len = [d["txt_len"] for d in batch_data]
-        padded_batch["txt_len"] = torch.tensor(txt_len, dtype=torch.long, device=device)
-        padded_batch["txt_mask"] = torch.tensor(mask, dtype=torch.bool, device=device)
+    padded_batch['prompt_pos_list'] = batch_data[0]['prompt_pos_list']
+    # if config['src_self_sup']:
+    #     txt_ids, mask = padding(
+    #         [d["txt_ids"] for d in batch_data], pad_value)
+    #     padded_batch["txt_ids"] = torch.tensor(txt_ids, dtype=torch.long, device=device)
+    #     txt_len = [d["txt_len"] for d in batch_data]
+    #     padded_batch["txt_len"] = torch.tensor(txt_len, dtype=torch.long, device=device)
+    #     padded_batch["txt_mask"] = torch.tensor(mask, dtype=torch.bool, device=device)
 
     enc_src_ids, mask = padding(
         [d["enc_src_ids"] for d in batch_data], pad_value)
     padded_batch["enc_src_ids"] = torch.tensor(enc_src_ids, dtype=torch.long, device=device)
     enc_src_len = [d["enc_src_len"] for d in batch_data]
     padded_batch["enc_src_len"] = torch.tensor(enc_src_len, dtype=torch.long, device=device)
-    padded_batch["enc_mask"] = torch.tensor(mask, dtype=torch.bool, device=device)
+    padded_batch["enc_mask"] = padded_batch["enc_src_ids"].ne(pad_value)
+    # print('83', padded_batch["enc_mask"])
     if config['enc_attn_mask']:
-        enc_attn_mask = get_enc_attn_mask(batch_data[0]['cls_toks_num'], torch.tensor(mask))
-        padded_batch["enc_attn_mask"] = torch.tensor(enc_attn_mask, dtype=torch.bool, device=device)
+        # print('84', padded_batch["enc_mask"].shape)
+        enc_attn_mask = get_enc_attn_mask(
+            batch_data[0]['cls_toks_num'], padded_batch["enc_mask"].float())
+        padded_batch["enc_attn_mask"] = enc_attn_mask.bool()
     else:
         padded_batch["enc_attn_mask"] = None
     
@@ -103,6 +105,18 @@ def collate_fn(batch_data, config):
     padded_batch["targ_ents"] = targ_ents
     return padded_batch
 
+def collate_fn(batch_data, config):
+    '''根据batch结果实时生成模型的输入数据，避免内存压力太大'''
+    head_batch = [b['head'] for b in batch_data]
+    head_batch = get_task_padded_batch(head_batch, config)
+    tail_batch = [b['tail'] for b in batch_data]
+    tail_batch = get_task_padded_batch(tail_batch, config)
+    # print('dataset 113', tail_batch)
+    return {
+        'head': head_batch,
+        'tail': tail_batch
+    }
+    
 def padding(data, pad_value=0, dim=2):
     '''
     pad data to maximum length
