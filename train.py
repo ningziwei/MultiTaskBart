@@ -201,8 +201,16 @@ def evaluate(config, model, loader):
         get_ents = get_semi_ents
         predicts, labels = [], []
         for multi_batch in loader:
-            # if len(batch['targ_ents'][0])==0: continue
             batch = multi_batch[task_type]
+            # print('train 206', batch['prompt_pos_list'], task_type)
+            # print(batch['targ_ents'][0])
+            # print('dec_src_ids_bund', len(batch['dec_src_ids_bund']))
+            # print(batch['dec_src_ids_bund'][0][0])
+            # print(batch['dec_src_ids_bund'][1][0])
+            # print('dec_targ_pos_bund', len(batch['dec_targ_pos_bund']))
+            # print(batch['dec_targ_pos_bund'][0][0])
+            # print(batch['dec_targ_pos_bund'][1][0])
+            # print(batch['enc_mask'][0])
             pred = model(
                 batch['enc_src_ids'],
                 batch['enc_src_len'],
@@ -215,6 +223,7 @@ def evaluate(config, model, loader):
             )
             # pred = [get_targ_ents(p, rotate_pos_cls) for p in pred]
             # pred = [calib_pred(p, ent_end_pos) for p in pred]
+            # print('train 219', pred[0])
             ent_pred = [get_ents(p, batch['prompt_pos_list'], task_type) for p in pred]
 
             predicts += ent_pred
@@ -252,9 +261,8 @@ def train(config):
         deal_pre_conf(config['model_path'], tokenizer)
         config['eos_id'] = tokenizer.eos_token_id
         config['pad_value'] = tokenizer.pad_token_id
-        config['dic_hir_pos_cls'] = tokenizer.dic_hir_pos_cls
         data_dealer = DataDealer(tokenizer, config)
-        rotate_pos_cls = data_dealer.rotate_pos_cls
+        # rotate_pos_cls = data_dealer.rotate_pos_cls
         # ent_end_pos = list(tokenizer.dic_ent_end_pos_cls.keys())[0]
         loaders = get_data_loader(config, data_dealer)
         train_loader, test_loader, valid_loader = loaders
@@ -287,11 +295,16 @@ def train(config):
         task_type = 'tail'
         for epoch in range(config["epochs"]):
             model.train()
-            # train_range = get_train_range(epoch, config['fold'])
             stage = epoch % denomin
-            # if epoch>84 and stage==denomin-2: continue
+            config['task_type'] = task_type
+            if task_type=='head':
+                config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[0]
+            else:
+                config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[1]
             for multi_batch in train_loader:
                 batch = multi_batch[task_type]
+                # print('295', batch['targ_ents'][0])
+                # print(batch['prompt_pos_list'])
                 step += 1
                 if config['src_self_sup'] and stage==0:
                     enc_src_ids = batch['txt_ids']
@@ -303,8 +316,11 @@ def train(config):
                     enc_src_len = batch['enc_src_len']
                     enc_padding_mask = batch['enc_mask']
                     enc_attn_mask = batch['enc_attn_mask']
-                config['task_type'] = task_type
-                # print('train 307', batch)
+                # print('train 308', batch['targ_ents'][0])
+                # print('train 309', enc_src_ids[0])
+                # print('train 310', batch['dec_src_ids_bund'][0][0])
+                # print('train 311', batch['dec_targ_pos_bund'][0][0])
+
                 loss, pred = model(
                     enc_src_ids,
                     enc_src_len,
@@ -342,7 +358,7 @@ def train(config):
                 tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
                 logger("Epoch %d, test entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
                     epoch + 1, tep, ter, tef, tep1, ter1, tef1))
-                if tef > best_f1:
+                if tef >= best_f1:
                     best_f1 = tef
                     best_epoch = epoch
                     torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, "snapshot.model"))
@@ -365,18 +381,21 @@ def predict(config):
     tokenizer = get_tokenizer(config)
     config['eos_id'] = tokenizer.eos_token_id
     config['pad_value'] = tokenizer.pad_token_id
-    config['dic_hir_pos_cls'] = tokenizer.dic_hir_pos_cls
+    # config['dic_hir_pos_cls'] = tokenizer.dic_hir_pos_cls
     data_dealer = DataDealer(tokenizer, config)
-    rotate_pos_cls = data_dealer.rotate_pos_cls
+    # rotate_pos_cls = data_dealer.rotate_pos_cls
     # ent_end_pos = list(tokenizer.dic_ent_end_pos_cls.keys())[0]
     loaders = get_data_loader(config, data_dealer)
     train_loader, test_loader, valid_loader = loaders
     config["total_steps"] = config["epochs"] * len(train_loader)
     model = get_model_optim_sched(config, tokenizer.dic_cls_id)[0]
 
+    if config['task_type']=='head':
+        config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[0]
+    else:
+        config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[1]
     state_dict_path = os.path.join(config["saved_path"], 'snapshot.model')
     model.load_state_dict(torch.load(state_dict_path))
-    config['task_type'] = 'head'
     valid_metrics = evaluate(config, model, valid_loader)
     vep, ver, vef, vep1, ver1, vef1 = [m*100 for m in valid_metrics]
     print("valid entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
@@ -402,10 +421,11 @@ if __name__=='__main__':
         with torch.autograd.detect_anomaly():
             train(config)
     else:
-        saved_path = "/data1/nzw/model_saved/HiBart/weibo_10281359"
+        saved_path = "/data1/nzw/model_saved/HiBart1/weibo_10291401"
         config_path = os.path.join(saved_path, 'config.json')
         with open(config_path, encoding="utf-8") as fp: config = json.load(fp)
         config['saved_path'] = saved_path
         config['config_path'] = config_path
         config['dataset_dir'] = os.path.join(config['data_dir'], config['dataset'])
+        config['task_type'] = 'tail'
         predict(config)

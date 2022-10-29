@@ -181,10 +181,10 @@ class HiBart(nn.Module):
             dec_src_ids = dec_src_ids_bund[0]
             dec_src_pos = dec_src_pos_bund[0]
             dec_padding_mask = dec_mask_bund[0]
-            dic_hir_pos_cls = self.args['dic_hir_pos_cls']
             # print('174', dec_src_ids[0])
             # print('175', dec_src_pos[0])
             eval_num = len(dec_src_ids_bund)
+
             if self.args['targ_self_sup']:
                 eval_num -= 1
             if self.args['src_self_sup']:
@@ -203,7 +203,7 @@ class HiBart(nn.Module):
                 )
                 batch_pred = torch.argmax(logits, dim=-1)
                 dec_src_ids = dec_src_ids.masked_fill(dec_padding_mask.eq(0), -1)
-                # print('183', batch_pred[0])
+                # print('hi_bart 183', batch_pred[0])
                 # print('184', enc_src_ids[0])
                 # print('185', dec_src_ids[0])
                 # print('186', dec_src_pos[0])
@@ -213,7 +213,7 @@ class HiBart(nn.Module):
                     batch_enc_src_ids=enc_src_ids.cpu().numpy(), 
                     batch_dec_src_ids=dec_src_ids.cpu().numpy(),
                     batch_dec_src_pos=dec_src_pos.cpu().numpy(),
-                    dic_pos_cls=dic_hir_pos_cls[i],
+                    dic_pos_cls=self.args['special_tok_pos'],
                     pad_value=self.args['pad_value'],
                     device=self.args['device']
                 )

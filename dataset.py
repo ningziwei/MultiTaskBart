@@ -103,6 +103,7 @@ def get_task_padded_batch(batch_data, config):
 
     targ_ents = [d["targ_ents"] for d in batch_data]
     padded_batch["targ_ents"] = targ_ents
+    # print('106', targ_ents[0])
     return padded_batch
 
 def collate_fn(batch_data, config):

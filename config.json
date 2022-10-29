@@ -7,7 +7,7 @@
     "prefix": "HiBart",
     "batch_size": 22,
     "group_interval": 20,
-    "start_eval": 20,
+    "start_eval": 12,
     "epochs": 200,
     "lr": 1e-5,
     "scheduler_step": [36],
