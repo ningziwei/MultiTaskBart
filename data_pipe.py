@@ -241,6 +241,7 @@ class DataDealer:
             'ent_seq': ent_seq, 
             'targ_ents': targ_ents
         }
+        # print(targ_ents)
 
         sample = {
             'head': head_task,
@@ -452,9 +453,9 @@ def get_ents_seq_from_semi_seq(
     head_seq, tail_seq, dec_src, rotate_pos_cls
 ):
     '''根据两个半边界序列得到完整的序列'''
-    print('data_pipe 451', len(head_seq), head_seq)
-    print(len(tail_seq), tail_seq)
-    print(len(dec_src), dec_src)
+    # print('data_pipe 451', len(head_seq), head_seq)
+    # print(len(tail_seq), tail_seq)
+    # print(len(dec_src), dec_src)
     ent_seq = []
     for i in range(len(dec_src)):
         if dec_src[i]==-1: break
@@ -512,9 +513,10 @@ def get_targ_ents_3(pos_list, rotate_pos_cls, ent_end_pos):
                     if i<N and pos_list[i] in rotate_pos_cls[1]:
                         ent.append(pos_list[i])
                         i += 1
+                    ents.append(ent)
                     break
                 i += 1
-            ents.append(ent)
+            # ents.append(ent)
         else:
             i += 1
     return ents
@@ -534,9 +536,10 @@ def get_targ_ents_2(pos_list, rotate_pos_cls, ent_end_pos=None):
                 # 碰到实体结束符
                 if pos_list[i] in rotate_pos_cls[1]:
                     i += 1
+                    ents.append(ent)
                     break
                 i += 1
-            ents.append(ent)
+            # ents.append(ent)
         else:
             i += 1
     return ents

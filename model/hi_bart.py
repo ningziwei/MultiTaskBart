@@ -12,6 +12,12 @@ class HiDecoder(nn.Module):
         causal_mask = torch.zeros(512, 512).fill_(float('-inf'))
         causal_mask = causal_mask.triu(diagonal=1)
         self.register_buffer('causal_mask', causal_mask.float())
+        hidden_size = decoder.embed_tokens.weight.size(1)
+        # self.decoder_mlp = nn.Sequential(
+        #     nn.Linear(hidden_size, hidden_size),
+        #     nn.Dropout(0.3)
+        # )
+        self.self_attn_layer_norm = nn.LayerNorm(hidden_size)
         self.dropout_layer = nn.Dropout(0.3)
         self.lstm = nn.LSTM(768, 384, 1, bidirectional=True)
     
@@ -38,7 +44,9 @@ class HiDecoder(nn.Module):
             return_dict=True
         )
         dec_output = dec_state_dic.last_hidden_state
-        dec_output = self.dropout_layer(dec_output)
+        # dec_output = self.dropout_layer(dec_output)
+        dec_output = self.self_attn_layer_norm(dec_output)
+        # dec_output = self.decoder_mlp(dec_output)
         
         # 用双向lstm处理decoder的输出向量
         if self.args['use_lstm']:
@@ -119,6 +127,7 @@ class HiBart(nn.Module):
             nn.Linear(hidden_size, hidden_size),
             nn.Dropout(0.3)
         )
+        self.self_attn_layer_norm = nn.LayerNorm(hidden_size)
         self.hi_decoder = HiDecoder(bart.decoder, args)
         
 
@@ -150,7 +159,12 @@ class HiBart(nn.Module):
         enc_src_embed = self.dropout_layer(enc_src_embed)
         enc_output_mlp = self.encoder_mlp(enc_output)
         src_embed = (enc_src_embed + enc_output_mlp)/2
-        # src_embed = enc_src_embed
+        src_embed = self.self_attn_layer_norm(src_embed)
+        # enc_src_embed = self.encoder.embed_tokens(enc_src_ids)
+        # enc_src_embed = self.self_attn_layer_norm(enc_src_embed)
+        # enc_output_mlp = self.encoder_mlp(enc_output)
+        # src_embed = (enc_src_embed + enc_output_mlp)/2
+        # src_embed = self.self_attn_layer_norm(src_embed)
         '''
         训练过程是batch_size*3*dec_max_len，三条都直接用到
         预测过程是batch_size*1*dec_max_len，只用第一条，后面的边生成边解码
@@ -224,5 +238,5 @@ class HiBart(nn.Module):
                     device=self.args['device']
                 )
                 dec_src_len = dec_padding_mask.sum(dim=-1)
-            return batch_pred.cpu().numpy().tolist(), flat_pred
+            return batch_pred.cpu().numpy(), flat_pred
 

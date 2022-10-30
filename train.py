@@ -255,8 +255,12 @@ def evaluate_2(config, model1, model2, loader):
         for multi_batch in loader:
             head_pred = use_model(model1, multi_batch['head'])
             tail_pred = use_model(model2, multi_batch['tail'])
-            dec_src = multi_batch['head']['dec_src_pos_bund'][0]
+            dec_src = multi_batch['head']['dec_src_pos_bund'][0].cpu().numpy()
             for i in range(len(head_pred)):
+                print('train 260')
+                print(head_pred[i])
+                print(tail_pred[i])
+                print(dec_src[i])
                 ent_seq = get_ents_seq_from_semi_seq(
                     head_pred[i], tail_pred[i], dec_src[i],
                     config['rotate_pos_cls']
@@ -264,6 +268,10 @@ def evaluate_2(config, model1, model2, loader):
                 ents = get_targ_ents_2(
                     ent_seq, config['rotate_pos_cls']
                 )
+                print('ent_seq 267', ent_seq)
+                print(ents)
+                print(multi_batch['cls']['targ_ents'][i])
+                ents = calib_pred(ents, [3], 2)
                 predicts.append(ents)
             labels += multi_batch['cls']['targ_ents']
         model1.train()
@@ -334,18 +342,14 @@ def train(config):
         denomin = 1
         if config['targ_self_sup']: denomin += 1
         
-        task_list = ['head', 'tail']
+        task_list = ['head']
         for epoch in range(config["epochs"]):
             model.train()
             stage = epoch % denomin
 
             for task_type in task_list:
-                print(task_type)
+                # print(task_type)
                 config['task_type'] = task_type
-                if task_type=='head':
-                    config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[0]
-                else:
-                    config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[1]
                 for multi_batch in train_loader:
                     batch = multi_batch[task_type]
                     step += 1
@@ -428,10 +432,6 @@ def predict(config):
     config["total_steps"] = config["epochs"] * len(train_loader)
     model = get_model_optim_sched(config, tokenizer.dic_tok_id)[0]
 
-    if config['task_type']=='head':
-        config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[0]
-    else:
-        config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[1]
     state_dict_path = os.path.join(config["saved_path"], 'snapshot.model')
     model.load_state_dict(torch.load(state_dict_path))
     valid_metrics = evaluate(config, model, valid_loader)
@@ -449,19 +449,19 @@ def predict_2(config):
     tokenizer = get_tokenizer(config)
     config['eos_id'] = tokenizer.eos_token_id
     config['pad_value'] = tokenizer.pad_token_id
-    config['rotate_pos_cls'] = tokenizer.rotate_pos_cls
     data_dealer = DataDealer(tokenizer, config)
-    # rotate_pos_cls = data_dealer.rotate_pos_cls
+    config['rotate_pos_cls'] = data_dealer.rotate_pos_cls
     loaders = get_data_loader(config, data_dealer)
     train_loader, test_loader, valid_loader = loaders
     config["total_steps"] = config["epochs"] * len(train_loader)
+    
     model1 = get_model_optim_sched(config, tokenizer.dic_tok_id)[0]
-    model2 = get_model_optim_sched(config, tokenizer.dic_tok_id)[0]
-
     head_state_dict_path = os.path.join(config["head_saved_path"], 'snapshot.model')
     model1.load_state_dict(torch.load(head_state_dict_path))
+    
+    model2 = get_model_optim_sched(config, tokenizer.dic_tok_id)[0]
     tail_state_dict_path = os.path.join(config["tail_saved_path"], 'snapshot.model')
-    model1.load_state_dict(torch.load(tail_state_dict_path))
+    model2.load_state_dict(torch.load(tail_state_dict_path))
 
     valid_metrics = evaluate_2(config, model1, model2, valid_loader)
     vep, ver, vef, vep1, ver1, vef1 = [m*100 for m in valid_metrics]
@@ -470,6 +470,26 @@ def predict_2(config):
     test_metrics = evaluate_2(config, model1, model2, test_loader)
     tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
     print("test entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
+        tep, ter, tef, tep1, ter1, tef1))
+    
+    config['task_type'] = 'head'
+    valid_metrics = evaluate(config, model1, valid_loader)
+    vep, ver, vef, vep1, ver1, vef1 = [m*100 for m in valid_metrics]
+    print("valid head p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
+        vep, ver, vef, vep1, ver1, vef1))
+    test_metrics = evaluate(config, model1, test_loader)
+    tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
+    print("test head p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
+        tep, ter, tef, tep1, ter1, tef1))
+    
+    config['task_type'] = 'tail'
+    valid_metrics = evaluate(config, model2, valid_loader)
+    vep, ver, vef, vep1, ver1, vef1 = [m*100 for m in valid_metrics]
+    print("valid tail p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
+        vep, ver, vef, vep1, ver1, vef1))
+    test_metrics = evaluate(config, model2, test_loader)
+    tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
+    print("test tail p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
         tep, ter, tef, tep1, ter1, tef1))
 
     
@@ -488,15 +508,15 @@ if __name__=='__main__':
         with torch.autograd.detect_anomaly():
             train(config)
     else:
-        saved_path = "/data1/nzw/model_saved/HiBart1/weibo_single tail"
+        saved_path = "/data1/nzw/model_saved/HiBart1/weibo_10302044"
         config_path = os.path.join(saved_path, 'config.json')
         with open(config_path, encoding="utf-8") as fp: config = json.load(fp)
         config['saved_path'] = saved_path
         config['config_path'] = config_path
         config['dataset_dir'] = os.path.join(config['data_dir'], config['dataset'])
-        config['task_type'] = 'tail'
+        config['task_type'] = 'head'
         predict(config)
 
-        config["head_saved_path"] = "/data1/nzw/model_saved/HiBart1/weibo_single head"
-        config["tail_saved_path"] = "/data1/nzw/model_saved/HiBart1/weibo_single tail"
-        predict_2(config)
+        # config["head_saved_path"] = "/data1/nzw/model_saved/HiBart1/weibo_single head"
+        # config["tail_saved_path"] = "/data1/nzw/model_saved/HiBart1/weibo_single tail"
+        # predict_2(config)

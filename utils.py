@@ -42,7 +42,7 @@ def other_metrics(predicts, labels):
     # ef = 2 * ep * er / max((ep + er), 0.0001)
     # print("尾边界 p=%.2f%%, r=%.2f%%, f=%.2f%%" % (ep, er, ef))
 
-def micro_metrics(predicts, labels):
+def micro_metrics(predicts, labels, task_type='head'):
     '''计算预测指标'''
     # other_metrics(predicts, labels)
     true_count, predict_count, gold_count = 0, 0, 0
@@ -62,6 +62,12 @@ def micro_metrics(predicts, labels):
     true_count, predict_count, gold_count = 0, 0, 0
     for pred_entity, gold_entity in zip(predicts, labels):
         '''边界的正确率'''
+        if task_type=='head':
+            pred_entity = [p[1:] for p in pred_entity]
+            gold_entity = [g[1:] for g in gold_entity]
+        elif task_type=='tail':
+            pred_entity = [p[:1] for p in pred_entity]
+            gold_entity = [g[:1] for g in gold_entity]
         for e in pred_entity:
             if e in gold_entity:
                 true_count += 1
