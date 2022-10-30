@@ -325,7 +325,7 @@ class DataDealer:
             所以，开始标记在targ首时，不用给targ前面补[CLS]要生成的字符
             其他情况下都需要补[CLS]要生成的字符
             '''
-            if not len(targ) or targ[0]['tag'] not in dic_tok_pos:
+            if not len(targ) or targ[0]['tag']!='start':
                 targ = [sent[0]] + targ
             return targ
         
