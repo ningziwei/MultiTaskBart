@@ -111,43 +111,42 @@ class MyTokenizer(BertTokenizer):
         self.unique_no_split_tokens += new_tokens
         self.add_tokens(new_tokens)
 
-        dic_cls_id = {}
-        dic_cls_order = {}
+        dic_tok_id = {}
+        dic_tok_order = {}
         num = 0
         for tok in new_tokens:
-            dic_cls_id[tok] = self.convert_tokens_to_ids(tok)
-            # dic_cls_order[tok] = len(dic_cls_order)
+            dic_tok_id[tok] = self.convert_tokens_to_ids(tok)
+            # dic_tok_order[tok] = len(dic_tok_order)
             if '-s' in tok:
-                dic_cls_order[tok] = num
+                dic_tok_order[tok] = num
                 end_tok = tok.replace('-s', '-e')
-                dic_cls_order[end_tok] = num + len(start_tokens)
+                dic_tok_order[end_tok] = num + len(start_tokens)
                 num += 1
-        dic_cls_pos = {k:v+2 for k,v in dic_cls_order.items()}
-        # print('dic_cls_pos', dic_cls_pos)
-        dic_start_pos_cls = {dic_cls_pos[k]:k for k in start_tokens}
-        dic_end_pos_cls = {dic_cls_pos[k]:k for k in end_tokens}
-        dic_ent_end_pos_cls = {dic_cls_pos[k]:k for k in ent_end_token}
-        dic_all_end_pos_cls = dic_end_pos_cls.copy()
+        dic_tok_pos = {k:v+2 for k,v in dic_tok_order.items()}
+        # print('dic_tok_pos', dic_tok_pos)
+        dic_start_pos_tok = {dic_tok_pos[k]:k for k in start_tokens}
+        dic_end_pos_tok = {dic_tok_pos[k]:k for k in end_tokens}
+        dic_ent_end_pos_tok = {dic_tok_pos[k]:k for k in ent_end_token}
+        dic_all_end_pos_tok = dic_end_pos_tok.copy()
         if len(ent_end_token):
-            dic_all_end_pos_cls[dic_cls_pos[ent_end_token[0]]] = ent_end_token[0]
+            dic_all_end_pos_tok[dic_tok_pos[ent_end_token[0]]] = ent_end_token[0]
 
-        self.dic_cls_id = dic_cls_id
-        self.dic_cls_order = dic_cls_order
-        self.dic_cls_pos = dic_cls_pos
-        # self.dic_order_cls = {v:k for k,v in dic_cls_order.items()}
-        self.dic_hir_pos_cls = [dic_start_pos_cls, dic_end_pos_cls]
-        self.dic_start_pos_cls = dic_start_pos_cls
-        self.dic_ent_end_pos_cls = dic_ent_end_pos_cls
-        self.dic_end_pos_cls = dic_end_pos_cls
-        self.dic_all_end_pos_cls = dic_all_end_pos_cls
+        self.dic_tok_id = dic_tok_id
+        self.dic_tok_order = dic_tok_order
+        self.dic_tok_pos = dic_tok_pos
+        self.dic_hir_pos_cls = [dic_start_pos_tok, dic_end_pos_tok]
+        self.dic_start_pos_tok = dic_start_pos_tok
+        self.dic_ent_end_pos_tok = dic_ent_end_pos_tok
+        self.dic_end_pos_tok = dic_end_pos_tok
+        self.dic_all_end_pos_tok = dic_all_end_pos_tok
         
 class DataDealer:
     def __init__(self, tokenizer, config):
         self.config = config
         self.tokenizer = tokenizer
         rotate_pos_cls = []
-        rotate_pos_cls.append(tokenizer.dic_start_pos_cls)
-        rotate_pos_cls.append(tokenizer.dic_all_end_pos_cls)
+        rotate_pos_cls.append(tokenizer.dic_start_pos_tok)
+        rotate_pos_cls.append(tokenizer.dic_all_end_pos_tok)
         self.rotate_pos_cls = rotate_pos_cls
         self.tokens_to_ids = self.tokenizer.convert_tokens_to_ids
 
@@ -211,23 +210,42 @@ class DataDealer:
             'targ_ents': [[10, 21, 22, 18, 11]]
         }
         '''
-        word_shift = len(self.tokenizer.dic_cls_pos) + 2
+        # print(sent)
+        word_shift = len(self.tokenizer.dic_tok_pos) + 2
         for i, s in enumerate(sent): 
             s['pos'] = i + word_shift
         # print('210', word_shift, sent)
         head_sent, head_targ, tail_sent, tail_targ = self.get_semi_sent(sent)
         head_dic_sent_bund = [sent, head_sent]
         head_dic_targ_bund = [head_targ]
-        # print('214', head_dic_sent_bund)
         head_task = self.get_one_task(head_dic_sent_bund, head_dic_targ_bund, 'head')
 
         tail_dic_sent_bund = [sent, tail_sent]
         tail_dic_targ_bund = [tail_targ]
+        # print('tail_sent', tail_sent)
+        # print('tail_targ', tail_targ)
         tail_task = self.get_one_task(tail_dic_sent_bund, tail_dic_targ_bund, 'end')
+
+        # print('head_task', head_task)
+        # print('tail_task', tail_task)
+        ent_seq = get_ents_seq_from_semi_seq(
+            head_seq=head_task['dec_targ_pos'][0], 
+            tail_seq=tail_task['dec_targ_pos'][0], 
+            dec_src=head_task['dec_src_pos'][0], 
+            rotate_pos_cls=self.rotate_pos_cls
+        )
+        targ_ents = get_targ_ents_2(
+            ent_seq, self.rotate_pos_cls
+        )
+        class_task = {
+            'ent_seq': ent_seq, 
+            'targ_ents': targ_ents
+        }
 
         sample = {
             'head': head_task,
-            'tail': tail_task
+            'tail': tail_task,
+            'cls': class_task
         }
         # print('221', head_task)
         # print('222', tail_task)
@@ -259,7 +277,7 @@ class DataDealer:
         '''
         last_w = {'word':'', 'tag':'o'}
         cls_tok_dic = self.tokenizer.cls_tok_dic
-        dic_cls_pos = self.tokenizer.dic_cls_pos
+        dic_tok_pos = self.tokenizer.dic_tok_pos
 
         sent = sent + [last_w]
         targ_sent = sent[1:] + [last_w]
@@ -271,7 +289,7 @@ class DataDealer:
             if w['tag'].startswith('b-'):
                 word = cls_tok_dic[w['tag'][2:]][0]
                 head_sent.append({
-                    'word':word,'tag':'start','pos':dic_cls_pos[word]
+                    'word':word,'tag':'start','pos':dic_tok_pos[word]
                 })
                 head_targ = head_targ[:-1]
                 head_targ.append(head_sent[-1])
@@ -288,7 +306,7 @@ class DataDealer:
             if w['tag'][:2] in ['o','b-'] and w_['tag'][:2] in ['i-','b-']:  
                 word = cls_tok_dic[w_['tag'][2:]][1]
                 tail_sent.append({
-                    'word':word,'tag':'end','pos':dic_cls_pos[word]
+                    'word':word,'tag':'end','pos':dic_tok_pos[word]
                 })
                 if w['word']: tail_targ = tail_targ[:-1]
                 tail_targ.append(tail_sent[-1])
@@ -307,7 +325,7 @@ class DataDealer:
             所以，开始标记在targ首时，不用给targ前面补[CLS]要生成的字符
             其他情况下都需要补[CLS]要生成的字符
             '''
-            if not len(targ) or targ[0]['word'] not in dic_cls_pos:
+            if not len(targ) or targ[0]['tag'] not in dic_tok_pos:
                 targ = [sent[0]] + targ
             return targ
         
@@ -352,10 +370,10 @@ class DataDealer:
         '''在编码器的输入序列中添加表示实体的特殊标记'''
         pad_token = self.tokenizer.pad_token
         if task_type=='head':
-            pos_cls = self.tokenizer.dic_start_pos_cls
+            pos_cls = self.tokenizer.dic_start_pos_tok
             padded_prompt_pos = list(pos_cls.values()) + [pad_token]*len(pos_cls)
         else:
-            pos_cls = self.tokenizer.dic_end_pos_cls
+            pos_cls = self.tokenizer.dic_end_pos_tok
             # print('359', pos_cls)
             padded_prompt_pos = [pad_token]*len(pos_cls) + list(pos_cls.values())
         src_toks = sent_bund[0]
@@ -422,12 +440,30 @@ def get_semi_ents(pos_list, pos_cls, task_type):
     '''获得实体一半的边界结果'''
     ents = []
     for i,pos in enumerate(pos_list):
+        if pos==-1: break
         if pos in pos_cls:
             if task_type=='head':
                 ents.append(pos_list[i:i+2])
             else:
                 ents.append(pos_list[i-1:i+1])
     return ents
+
+def get_ents_seq_from_semi_seq(
+    head_seq, tail_seq, dec_src, rotate_pos_cls
+):
+    '''根据两个半边界序列得到完整的序列'''
+    print('data_pipe 451', len(head_seq), head_seq)
+    print(len(tail_seq), tail_seq)
+    print(len(dec_src), dec_src)
+    ent_seq = []
+    for i in range(len(dec_src)):
+        if dec_src[i]==-1: break
+        ent_seq.append(dec_src[i])
+        if tail_seq[i] in rotate_pos_cls[1]:
+            ent_seq.append(tail_seq[i])
+        if head_seq[i] in rotate_pos_cls[0]:
+            ent_seq.append(head_seq[i])
+    return ent_seq
 
 def get_targ_ents(pos_list, rotate_pos_cls):
     '''得到序列中的实体'''
@@ -515,7 +551,7 @@ def merge_bound_token(src_seq, start_seq, end_seq):
         merge_seq.append(src_seq[i])
         if end_seq[i]['tag']=='end':
             merge_seq.append(end_seq[i])
-        if start_seq[i]['tag']=='end':
+        if start_seq[i]['tag']=='start':
             merge_seq.append(start_seq[i])
     return merge_seq
 

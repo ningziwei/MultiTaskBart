@@ -80,11 +80,11 @@ def get_data_loader(config, data_dealer):
     valid_loader = get_loader("dev")
     return train_loader, test_loader, valid_loader
 
-def init_cls_token_triv(bart, dic_cls_id, triv_tokenizer):
+def init_cls_token_triv(bart, dic_tok_id, triv_tokenizer):
     '''在bart模型中初始化特殊标记的嵌入向量'''
     num_tokens, _ = bart.encoder.embed_tokens.weight.shape
-    bart.resize_token_embeddings(len(dic_cls_id)+num_tokens)
-    for tok, val in dic_cls_id.items():
+    bart.resize_token_embeddings(len(dic_tok_id)+num_tokens)
+    for tok, val in dic_tok_id.items():
         char_idx = triv_tokenizer.convert_tokens_to_ids(
             triv_tokenizer.tokenize(tok.strip('<>'))
         )
@@ -95,10 +95,10 @@ def init_cls_token_triv(bart, dic_cls_id, triv_tokenizer):
         embed = embed.new_tensor(embed, requires_grad=True)
         bart.encoder.embed_tokens.weight.data[val] = embed
 
-def init_cls_token_statistic(bart, dic_cls_id, triv_tokenizer, sentences):
+def init_cls_token_statistic(bart, dic_tok_id, triv_tokenizer, sentences):
     '''在bart模型中初始化特殊标记的嵌入向量'''
     num_tokens, _ = bart.encoder.embed_tokens.weight.shape
-    bart.resize_token_embeddings(len(dic_cls_id)+num_tokens)
+    bart.resize_token_embeddings(len(dic_tok_id)+num_tokens)
     last_w = {'word':'', 'tag':'o'}
     cls_margin_word = defaultdict(list)
     for sent in sentences:
@@ -123,7 +123,7 @@ def init_cls_token_statistic(bart, dic_cls_id, triv_tokenizer, sentences):
                 if w['word']: cls_margin_word[tag].append(w['word'])
             w_ = w
     cls_margin_word['<<lab-e>>'] = cls_margin_word['<<ent_end>>']
-    for tok, val in dic_cls_id.items():
+    for tok, val in dic_tok_id.items():
         char_idx = triv_tokenizer.convert_tokens_to_ids(
             triv_tokenizer.tokenize(''.join(cls_margin_word[tok]))
         )
@@ -141,7 +141,7 @@ def init_cls_token_statistic(bart, dic_cls_id, triv_tokenizer, sentences):
         embed = embed.clone().detach().requires_grad_(True)
         bart.encoder.embed_tokens.weight.data[val] = embed
 
-def get_model_optim_sched(config, dic_cls_id):
+def get_model_optim_sched(config, dic_tok_id):
     '''初始化模型、优化器、学习率函数'''
     device = config['device']
     model_path = config['model_path']
@@ -155,11 +155,11 @@ def get_model_optim_sched(config, dic_cls_id):
 
     triv_tokenizer = MyTokenizer.from_pretrained(model_path)
     if not config['margin_char_init']:
-        init_cls_token_triv(bart, dic_cls_id, triv_tokenizer)
+        init_cls_token_triv(bart, dic_tok_id, triv_tokenizer)
     else:
         file_path = os.path.join(config['dataset_dir'], 'train.train')
         sentences = parse_CoNLL_file(file_path)
-        init_cls_token_statistic(bart, dic_cls_id, triv_tokenizer, sentences)
+        init_cls_token_statistic(bart, dic_tok_id, triv_tokenizer, sentences)
     # print('77', bart.decoder.embed_tokens.weight.data[21144])
     loss_fn = CrossEntropyLossWithMask()
     model = HiBart(bart, loss_fn, config).to(device)
@@ -211,7 +211,7 @@ def evaluate(config, model, loader):
             # print(batch['dec_targ_pos_bund'][0][0])
             # print(batch['dec_targ_pos_bund'][1][0])
             # print(batch['enc_mask'][0])
-            pred = model(
+            dec_pred, flat_pred = model(
                 batch['enc_src_ids'],
                 batch['enc_src_len'],
                 batch['enc_mask'],
@@ -224,31 +224,73 @@ def evaluate(config, model, loader):
             # pred = [get_targ_ents(p, rotate_pos_cls) for p in pred]
             # pred = [calib_pred(p, ent_end_pos) for p in pred]
             # print('train 219', pred[0])
-            ent_pred = [get_ents(p, batch['prompt_pos_list'], task_type) for p in pred]
+            ent_pred = [get_ents(p, batch['prompt_pos_list'], task_type) for p in flat_pred]
 
             predicts += ent_pred
             labels += batch['targ_ents']
         model.train()
     return utils.micro_metrics(predicts, labels)
 
-def get_train_range(epoch, fold):
-    '''
-    根据epoch生成不同的range
-    控制用哪一阶段做训练
-    '''
-    return range(fold+1)
-    if epoch<10:
-        return [0]
-    elif epoch<20:
-        return [1]
-    elif epoch<25:
-        return [2]
-    else:
-        return range(3)
+def use_model(model, batch):
+    dec_pred, _ = model(
+        batch['enc_src_ids'],
+        batch['enc_src_len'],
+        batch['enc_mask'],
+        enc_attn_mask=batch['enc_attn_mask'],
+        dec_src_ids_bund=batch['dec_src_ids_bund'],
+        dec_src_pos_bund=batch['dec_src_pos_bund'],
+        dec_mask_bund=batch['dec_mask_bund'],
+        prompt_pos_list=batch['prompt_pos_list']
+    )
+    return dec_pred
+
+def evaluate_2(config, model1, model2, loader):
+    # config1 = config.copy()
+    # config2 = config.copy()
+    predicts = []
+    labels = []
+    with torch.no_grad():
+        model1.eval()
+        model2.eval()
+        for multi_batch in loader:
+            head_pred = use_model(model1, multi_batch['head'])
+            tail_pred = use_model(model2, multi_batch['tail'])
+            dec_src = multi_batch['head']['dec_src_pos_bund'][0]
+            for i in range(len(head_pred)):
+                ent_seq = get_ents_seq_from_semi_seq(
+                    head_pred[i], tail_pred[i], dec_src[i],
+                    config['rotate_pos_cls']
+                )
+                ents = get_targ_ents_2(
+                    ent_seq, config['rotate_pos_cls']
+                )
+                predicts.append(ents)
+            labels += multi_batch['cls']['targ_ents']
+        model1.train()
+        model2.train()
+    return utils.micro_metrics(predicts, labels)
+
+# def get_ents_seq_from_semi_seq(head_pred, tail_pred, multi_batch):
+#     '''根据两个半边界序列得到完整的序列'''
+#     head_pos = multi_batch['head']['prompt_pos_list']
+#     tail_pos = multi_batch['tail']['prompt_pos_list']
+#     dec_src = multi_batch['head']['dec_src_pos_bund'][0]
+#     batch_ent_seq = []
+#     for i in range(len(dec_src)):
+#         ent_seq = []
+#         for j in range(len(dec_src[i])):
+#             if dec_src[i][j]==-1: continue
+#             ent_seq.append(dec_src[i][j])
+#             if tail_pred[i][j] in tail_pos:
+#                 ent_seq.append(tail_pred[i][j])
+#             if head_pred[i][j] in head_pos:
+#                 ent_seq.append(head_pred[i][j])
+#         batch_ent_seq.append(ent_seq)
+#     return batch_ent_seq
 
 def deal_pre_conf(model_path, tokenizer):
     pre_conf = PretrainedConfig.from_pretrained(model_path)
-    pre_conf.tag_num = len(tokenizer.dic_cls_id)
+    pre_conf.tag_num = len(tokenizer.dic_tok_id)
     pre_conf.tag_num = 0
     pre_conf.save_pretrained(model_path)
 
@@ -263,11 +305,10 @@ def train(config):
         config['pad_value'] = tokenizer.pad_token_id
         data_dealer = DataDealer(tokenizer, config)
         # rotate_pos_cls = data_dealer.rotate_pos_cls
-        # ent_end_pos = list(tokenizer.dic_ent_end_pos_cls.keys())[0]
         loaders = get_data_loader(config, data_dealer)
         train_loader, test_loader, valid_loader = loaders
         config["total_steps"] = config["epochs"] * len(train_loader)
-        m_o_s = get_model_optim_sched(config, tokenizer.dic_cls_id)
+        m_o_s = get_model_optim_sched(config, tokenizer.dic_tok_id)
         model, optimizer, batch_sched, epoch_sched = m_o_s
         logger("Init model.")
     except KeyboardInterrupt:
@@ -292,77 +333,75 @@ def train(config):
         step = 0
         denomin = 1
         if config['targ_self_sup']: denomin += 1
-        task_type = 'tail'
+        
+        task_list = ['head', 'tail']
         for epoch in range(config["epochs"]):
             model.train()
             stage = epoch % denomin
-            config['task_type'] = task_type
-            if task_type=='head':
-                config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[0]
-            else:
-                config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[1]
-            for multi_batch in train_loader:
-                batch = multi_batch[task_type]
-                # print('295', batch['targ_ents'][0])
-                # print(batch['prompt_pos_list'])
-                step += 1
-                if config['src_self_sup'] and stage==0:
-                    enc_src_ids = batch['txt_ids']
-                    enc_src_len = batch['txt_len']
-                    enc_padding_mask = batch['txt_mask']
-                    enc_attn_mask = None
+
+            for task_type in task_list:
+                print(task_type)
+                config['task_type'] = task_type
+                if task_type=='head':
+                    config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[0]
                 else:
+                    config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[1]
+                for multi_batch in train_loader:
+                    batch = multi_batch[task_type]
+                    step += 1
+                    batch = multi_batch[task_type]
                     enc_src_ids = batch['enc_src_ids']
                     enc_src_len = batch['enc_src_len']
                     enc_padding_mask = batch['enc_mask']
                     enc_attn_mask = batch['enc_attn_mask']
-                # print('train 308', batch['targ_ents'][0])
-                # print('train 309', enc_src_ids[0])
-                # print('train 310', batch['dec_src_ids_bund'][0][0])
-                # print('train 311', batch['dec_targ_pos_bund'][0][0])
+                    # print('train 308', batch['targ_ents'][0])
+                    # print('train 309', enc_src_ids[0])
+                    # print('train 310', batch['dec_src_ids_bund'][0][0])
+                    # print('train 311', batch['dec_targ_pos_bund'][0][0])
 
-                loss, pred = model(
-                    enc_src_ids,
-                    enc_src_len,
-                    enc_padding_mask,
-                    enc_attn_mask=enc_attn_mask,
-                    dec_src_ids_bund=batch['dec_src_ids_bund'],
-                    dec_mask_bund=batch['dec_mask_bund'],
-                    dec_targ_pos_bund=batch['dec_targ_pos_bund'],
-                    prompt_pos_list=batch['prompt_pos_list'],
-                    train_range=[stage]
-                )
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
-                if step % int(config["grad_accum_step"]) == 0:
-                    optimizer.step()
-                    batch_sched.step()
-                    optimizer.zero_grad()
-                accum_loss.append(loss.item())
-                if step % int(config["show_loss_step"]) == 0:
-                    # print('train 273', model.encoder.embed_tokens.weight.data[21144][5:10])
-                    # print('train 273', model.encoder.embed_tokens.weight.data[21144].requires_grad)
-                    mean_loss = sum(accum_loss) / len(accum_loss)
-                    logger("Epoch %d, step %d / %d, loss = %.4f" % (
-                        epoch+1, step, len(train_loader), mean_loss
-                    ))
-                    accum_loss = []
-            epoch_sched.step()
+                    loss, pred = model(
+                        enc_src_ids,
+                        enc_src_len,
+                        enc_padding_mask,
+                        enc_attn_mask=enc_attn_mask,
+                        dec_src_ids_bund=batch['dec_src_ids_bund'],
+                        dec_mask_bund=batch['dec_mask_bund'],
+                        dec_targ_pos_bund=batch['dec_targ_pos_bund'],
+                        prompt_pos_list=batch['prompt_pos_list'],
+                        train_range=[stage]
+                    )
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
+                    if step % int(config["grad_accum_step"]) == 0:
+                        optimizer.step()
+                        batch_sched.step()
+                        optimizer.zero_grad()
+                    accum_loss.append(loss.item())
+                    if step % int(config["show_loss_step"]) == 0:
+                        # print('train 273', model.encoder.embed_tokens.weight.data[21144][5:10])
+                        # print('train 273', model.encoder.embed_tokens.weight.data[21144].requires_grad)
+                        mean_loss = sum(accum_loss) / len(accum_loss)
+                        logger("Epoch %d, step %d / %d, loss = %.4f" % (
+                            epoch+1, step, len(train_loader), mean_loss
+                        ))
+                        accum_loss = []
+                epoch_sched.step()
 
-            if epoch>=config['start_eval']:
-                valid_metrics = evaluate(config, model, valid_loader)
-                vep, ver, vef, vep1, ver1, vef1 = [m*100 for m in valid_metrics]
-                logger("Epoch %d, valid entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
-                    epoch + 1, vep, ver, vef, vep1, ver1, vef1))
-                test_metrics = evaluate(config, model, test_loader)
-                tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
-                logger("Epoch %d, test entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
-                    epoch + 1, tep, ter, tef, tep1, ter1, tef1))
-                if tef >= best_f1:
-                    best_f1 = tef
-                    best_epoch = epoch
-                    torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, "snapshot.model"))
-                    logger("Epoch %d, save model." % (epoch+1))
+                if epoch>=config['start_eval']:
+                    valid_metrics = evaluate(config, model, valid_loader)
+                    vep, ver, vef, vep1, ver1, vef1 = [m*100 for m in valid_metrics]
+                    logger("Epoch %d, valid entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
+                        epoch + 1, vep, ver, vef, vep1, ver1, vef1))
+                    test_metrics = evaluate(config, model, test_loader)
+                    tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
+                    logger("Epoch %d, test entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
+                        epoch + 1, tep, ter, tef, tep1, ter1, tef1))
+                    if tef >= best_f1:
+                        best_f1 = tef
+                        best_epoch = epoch
+                        torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, "snapshot.model"))
+                        logger("Epoch %d, save model." % (epoch+1))
+            
         logger("Best epoch %d, best entity f1: %.2f%%" % (best_epoch+1, best_f1))
         logger.fp.close()
     except KeyboardInterrupt:
@@ -384,11 +423,10 @@ def predict(config):
     # config['dic_hir_pos_cls'] = tokenizer.dic_hir_pos_cls
     data_dealer = DataDealer(tokenizer, config)
     # rotate_pos_cls = data_dealer.rotate_pos_cls
-    # ent_end_pos = list(tokenizer.dic_ent_end_pos_cls.keys())[0]
     loaders = get_data_loader(config, data_dealer)
     train_loader, test_loader, valid_loader = loaders
     config["total_steps"] = config["epochs"] * len(train_loader)
-    model = get_model_optim_sched(config, tokenizer.dic_cls_id)[0]
+    model = get_model_optim_sched(config, tokenizer.dic_tok_id)[0]
 
     if config['task_type']=='head':
         config['special_tok_pos'] = tokenizer.dic_hir_pos_cls[0]
@@ -401,6 +439,35 @@ def predict(config):
     print("valid entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
         vep, ver, vef, vep1, ver1, vef1))
     test_metrics = evaluate(config, model, test_loader)
+    tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
+    print("test entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
+        tep, ter, tef, tep1, ter1, tef1))
+
+def predict_2(config):
+    config['device'] = device
+    # 初始化分词器、数据集和模型
+    tokenizer = get_tokenizer(config)
+    config['eos_id'] = tokenizer.eos_token_id
+    config['pad_value'] = tokenizer.pad_token_id
+    config['rotate_pos_cls'] = tokenizer.rotate_pos_cls
+    data_dealer = DataDealer(tokenizer, config)
+    # rotate_pos_cls = data_dealer.rotate_pos_cls
+    loaders = get_data_loader(config, data_dealer)
+    train_loader, test_loader, valid_loader = loaders
+    config["total_steps"] = config["epochs"] * len(train_loader)
+    model1 = get_model_optim_sched(config, tokenizer.dic_tok_id)[0]
+    model2 = get_model_optim_sched(config, tokenizer.dic_tok_id)[0]
+
+    head_state_dict_path = os.path.join(config["head_saved_path"], 'snapshot.model')
+    model1.load_state_dict(torch.load(head_state_dict_path))
+    tail_state_dict_path = os.path.join(config["tail_saved_path"], 'snapshot.model')
+    model1.load_state_dict(torch.load(tail_state_dict_path))
+
+    valid_metrics = evaluate_2(config, model1, model2, valid_loader)
+    vep, ver, vef, vep1, ver1, vef1 = [m*100 for m in valid_metrics]
+    print("valid entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
+        vep, ver, vef, vep1, ver1, vef1))
+    test_metrics = evaluate_2(config, model1, model2, test_loader)
     tep, ter, tef, tep1, ter1, tef1 = [m*100 for m in test_metrics]
     print("test entity p=%.2f%%, r=%.2f%%, f=%.2f%%, p=%.2f%%, r=%.2f%%, f=%.2f%%" % (
         tep, ter, tef, tep1, ter1, tef1))
@@ -421,7 +488,7 @@ if __name__=='__main__':
         with torch.autograd.detect_anomaly():
             train(config)
     else:
-        saved_path = "/data1/nzw/model_saved/HiBart1/weibo_10291401"
+        saved_path = "/data1/nzw/model_saved/HiBart1/weibo_single tail"
         config_path = os.path.join(saved_path, 'config.json')
         with open(config_path, encoding="utf-8") as fp: config = json.load(fp)
         config['saved_path'] = saved_path
@@ -429,3 +496,7 @@ if __name__=='__main__':
         config['dataset_dir'] = os.path.join(config['data_dir'], config['dataset'])
         config['task_type'] = 'tail'
         predict(config)
+
+        config["head_saved_path"] = "/data1/nzw/model_saved/HiBart1/weibo_single head"
+        config["tail_saved_path"] = "/data1/nzw/model_saved/HiBart1/weibo_single tail"
+        predict_2(config)

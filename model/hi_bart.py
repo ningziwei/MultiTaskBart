@@ -127,7 +127,7 @@ class HiBart(nn.Module):
         enc_padding_mask, enc_attn_mask=None,
         dec_src_ids_bund=None, dec_src_pos_bund=None,
         dec_mask_bund=None, dec_targ_pos_bund=None,
-        prompt_pos_list = None, train_range=range(3)
+        prompt_pos_list = None, train_range=range(3),
     ):
         '''
         enc_src_ids: batch_size*enc_max_len
@@ -177,7 +177,12 @@ class HiBart(nn.Module):
             batch_pred = torch.argmax(logits, dim=-1)
             return batch_loss, batch_pred
         else:
-            '''预测过程，执行后解码，解码结果再给到decoder'''
+            '''
+            预测过程，执行后解码，解码结果再给到decoder
+            return:
+              batch_pred: decoder直接的预测结果，pad部分是-1
+              flat_pred: 将dec_src跟batch_pred拉平后的结果，没有pad
+            '''
             dec_src_ids = dec_src_ids_bund[0]
             dec_src_pos = dec_src_pos_bund[0]
             dec_padding_mask = dec_mask_bund[0]
@@ -203,26 +208,21 @@ class HiBart(nn.Module):
                 )
                 batch_pred = torch.argmax(logits, dim=-1)
                 dec_src_ids = dec_src_ids.masked_fill(dec_padding_mask.eq(0), -1)
+                batch_pred = batch_pred.masked_fill(dec_padding_mask.eq(0), -1)
                 # print('hi_bart 183', batch_pred[0])
                 # print('184', enc_src_ids[0])
                 # print('185', dec_src_ids[0])
                 # print('186', dec_src_pos[0])
                 # print('187', dic_hir_pos_cls[i])
-                dec_src_ids, dec_src_pos, dec_padding_mask, dec_src_pos_unpadded = flat_sequence(
+                dec_src_ids, dec_src_pos, dec_padding_mask, flat_pred = flat_sequence(
                     batch_pred.cpu().numpy(),
                     batch_enc_src_ids=enc_src_ids.cpu().numpy(), 
                     batch_dec_src_ids=dec_src_ids.cpu().numpy(),
                     batch_dec_src_pos=dec_src_pos.cpu().numpy(),
-                    dic_pos_cls=self.args['special_tok_pos'],
+                    dic_pos_cls=prompt_pos_list,
                     pad_value=self.args['pad_value'],
                     device=self.args['device']
                 )
                 dec_src_len = dec_padding_mask.sum(dim=-1)
-                # print('194', batch_pred[0])
-                # print('195', dec_src_ids[0])
-                # print('196', dec_src_pos[0])
-                # print('197', dec_src_pos_unpadded[0])
-            # print('hi_bart 194', dec_src_pos_unpadded)
-            return dec_src_pos_unpadded
-
+            return batch_pred.cpu().numpy().tolist(), flat_pred
 

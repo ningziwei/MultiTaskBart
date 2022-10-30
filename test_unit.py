@@ -30,8 +30,8 @@ def test_my_tokenizer(config):
     txt = '我有一个小毛驴 \t我从来也不骑'
     print(my_tknzr.tokenize(txt))
     print(my_tknzr(txt))
-    # print(my_tknzr.dic_cls_id)
-    # print(my_tknzr.dic_cls_order)
+    # print(my_tknzr.dic_tok_id)
+    # print(my_tknzr.dic_tok_order)
     # print(my_tknzr.dic_hir_pos_cls)
 
 def test_data_dealer(config):
@@ -62,6 +62,13 @@ def test_data_dealer(config):
     sent = [
         {'word':'中','tag':'b-loc.nam'},{'word':'国','tag':'i-loc.nam'},
         {'word':'人','tag':'b-per.nam'},{'word':'物','tag':'i-per.nam'},
+    ]
+    sent = [
+        {'word': '欧', 'tag': 'b-gpe.nam'}, {'word': '美', 'tag': 'b-gpe.nam'}, 
+        {'word': '时', 'tag': 'o'}, {'word': '尚', 'tag': 'o'}, {'word': '热', 'tag': 'o'}, 
+        {'word': '门', 'tag': 'o'}, {'word': '榜', 'tag': 'o'}, {'word': '心', 'tag': 'o'}, 
+        {'word': '谢', 'tag': 'b-per.nam'}, {'word': '耳','tag': 'i-per.nam'}, 
+        {'word': '朵', 'tag': 'i-per.nam'}, {'word': '。', 'tag': 'o'}, {'word': '。', 'tag': 'o'}
     ]
     # sent = [{'word':'感','tag':'o'}]
     # res = data_dealer.get_semi_sent(sent)
