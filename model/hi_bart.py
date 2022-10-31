@@ -59,8 +59,8 @@ class HiDecoder(nn.Module):
         # enc_output = self.encoder_mlp(enc_output)
         # enc_output = self.dropout_layer(enc_output)
         # src_embed = (enc_src_embed + enc_output)/2
-        # dec_output = dec_output/(dec_output*dec_output).sum(-1).unsqueeze(-1).sqrt()
-        # src_embed = src_embed/(src_embed*src_embed).sum(-1).unsqueeze(-1).sqrt()
+        dec_output = dec_output/(dec_output*dec_output).sum(-1).unsqueeze(-1).sqrt()
+        src_embed = src_embed/(src_embed*src_embed).sum(-1).unsqueeze(-1).sqrt()
         word_scores = torch.einsum('blh,bnh->bln', dec_output, src_embed)
 
         
