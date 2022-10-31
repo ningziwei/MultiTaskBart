@@ -342,7 +342,7 @@ def train(config):
         denomin = 1
         if config['targ_self_sup']: denomin += 1
         
-        task_list = ['head']
+        task_list = ['tail']
         for epoch in range(config["epochs"]):
             model.train()
             stage = epoch % denomin

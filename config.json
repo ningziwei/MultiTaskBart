@@ -10,7 +10,7 @@
     "start_eval": 12,
     "epochs": 200,
     "lr": 1e-5,
-    "scheduler_step": [50],
+    "scheduler_step": [60],
     "grad_accum_step": 1,
     "show_loss_step": 50,
     "任务结构参数": 1,

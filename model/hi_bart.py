@@ -47,17 +47,9 @@ class HiDecoder(nn.Module):
         # dec_output = self.dropout_layer(dec_output)
         dec_output = self.self_attn_layer_norm(dec_output)
         # dec_output = self.decoder_mlp(dec_output)
-        
-        # 用双向lstm处理decoder的输出向量
-        if self.args['use_lstm']:
-            packed_embs = pack_padded_sequence(
-                dec_output, dec_src_len.cpu(), batch_first=True, enforce_sorted=False)
-            lstm_out, (_, _) = self.lstm(packed_embs)
-            lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
-            dec_output = self.dropout_layer(lstm_out)
 
         # 初始化预测结果，bsz*dec_out_max_len*enc_out_max_len
-        '''可能要补+1'''
+        '''可能要补+1，用特殊标记token位置的PAD避免长度补齐操作'''
         logits = dec_output.new_full(
             list(dec_output.size()[:2])+[enc_output.size(1)],
             fill_value=-1e32)
@@ -67,7 +59,10 @@ class HiDecoder(nn.Module):
         # enc_output = self.encoder_mlp(enc_output)
         # enc_output = self.dropout_layer(enc_output)
         # src_embed = (enc_src_embed + enc_output)/2
+        # dec_output = dec_output/(dec_output*dec_output).sum(-1).unsqueeze(-1).sqrt()
+        # src_embed = src_embed/(src_embed*src_embed).sum(-1).unsqueeze(-1).sqrt()
         word_scores = torch.einsum('blh,bnh->bln', dec_output, src_embed)
+
         
         if self.args['static_eos']:
             # 静态结束符，用词表中的结束符嵌入向量作为目标
@@ -155,11 +150,18 @@ class HiBart(nn.Module):
         )
         enc_output = enc_state_dic.last_hidden_state
         '''src_embed 用于在decoder输出部分计算相似度'''
+        # head 80.2, 81.05
         enc_src_embed = self.encoder.embed_tokens(enc_src_ids)
         enc_src_embed = self.dropout_layer(enc_src_embed)
         enc_output_mlp = self.encoder_mlp(enc_output)
         src_embed = (enc_src_embed + enc_output_mlp)/2
         src_embed = self.self_attn_layer_norm(src_embed)
+
+        # enc_src_embed = self.encoder.embed_tokens(enc_src_ids)
+        # src_embed = self.self_attn_layer_norm(enc_src_embed) + self.self_attn_layer_norm(enc_output)
+        # src_embed = self.encoder_mlp(src_embed)
+        # src_embed = self.self_attn_layer_norm(src_embed)
+
         # enc_src_embed = self.encoder.embed_tokens(enc_src_ids)
         # enc_src_embed = self.self_attn_layer_norm(enc_src_embed)
         # enc_output_mlp = self.encoder_mlp(enc_output)
